@@ -222,10 +222,3 @@ Comprehensive test suite covering:
 - Staking rewards distribution
 - Cross-chain bridge support
 
-## License
-
-MIT
-
-## Author
-
-Implemented for Partnr Network Global Placement Program
