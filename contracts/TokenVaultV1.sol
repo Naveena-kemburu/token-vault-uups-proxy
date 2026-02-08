@@ -12,7 +12,7 @@ contract TokenVaultV1 is Initializable, UUPSUpgradeable, AccessControlUpgradeabl
     bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
     
     IERC20 public token;
-    address public admin;
+    address private _admin;
     uint256 public depositFee; // in basis points (100 = 1%)
     
     mapping(address => uint256) public balances;
@@ -27,16 +27,26 @@ contract TokenVaultV1 is Initializable, UUPSUpgradeable, AccessControlUpgradeabl
     }
     
     /// @notice Initialize the TokenVault contract
-    function initialize(address _token, address _admin, uint256 _depositFee) external initializer {
+    /// @param _token The ERC20 token to use for the vault
+    /// @param admin The admin address to grant roles
+    /// @param _depositFee The deposit fee in basis points
+    function initialize(address _token, address admin, uint256 _depositFee) external initializer {
         token = IERC20(_token);
-        admin = _admin;
+        _admin = admin;
         depositFee = _depositFee;
         
-        _grantRole(DEFAULT_ADMIN_ROLE, _admin);
-        _grantRole(UPGRADER_ROLE, _admin);
+        _grantRole(DEFAULT_ADMIN_ROLE, admin);
+        _grantRole(UPGRADER_ROLE, admin);
+    }
+    
+    /// @notice Get the admin address
+    /// @return The admin address
+    function getAdmin() external view returns (address) {
+        return _admin;
     }
     
     /// @notice Deposit tokens into the vault
+    /// @param amount The amount of tokens to deposit
     function deposit(uint256 amount) external {
         require(amount > 0, "Amount must be greater than 0");
         
@@ -52,6 +62,7 @@ contract TokenVaultV1 is Initializable, UUPSUpgradeable, AccessControlUpgradeabl
     }
     
     /// @notice Withdraw tokens from the vault
+    /// @param amount The amount of tokens to withdraw
     function withdraw(uint256 amount) external {
         require(amount > 0, "Amount must be greater than 0");
         require(balances[msg.sender] >= amount, "Insufficient balance");
@@ -65,30 +76,34 @@ contract TokenVaultV1 is Initializable, UUPSUpgradeable, AccessControlUpgradeabl
     }
     
     /// @notice Get user balance
+    /// @param user The user address
+    /// @return The user's balance
     function balanceOf(address user) external view returns (uint256) {
         return balances[user];
     }
     
     /// @notice Get total deposits
-    function totalDeposits_() external view returns (uint256) {
+    /// @return The total deposits
+    function totalDeposits() external view returns (uint256) {
         return totalDeposits;
     }
     
     /// @notice Get deposit fee
+    /// @return The deposit fee in basis points
     function getDepositFee() external view returns (uint256) {
         return depositFee;
     }
     
     /// @notice Get implementation version
+    /// @return The version string
     function getImplementationVersion() external pure returns (string memory) {
         return "V1";
     }
     
     /// @notice Authorize upgrade
+    /// @param newImplementation The address of the new implementation
     function _authorizeUpgrade(address newImplementation) internal override onlyRole(UPGRADER_ROLE) {}
     
-    /// @notice Support function names as per requirements
-    function totalDeposits() external view returns (uint256) {
-        return totalDeposits;
-    }
+    /// @notice Storage gap for future versions
+    uint256[50] private __gap;
 }
