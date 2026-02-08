@@ -1,42 +1,51 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "./TokenVaultV1.sol";
 
 /// @title TokenVaultV2
 /// @notice Upgraded version with yield rate and pause functionality
-contract TokenVaultV2 is UUPSUpgradeable, AccessControlUpgradeable {
-    bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
+contract TokenVaultV2 is TokenVaultV1 {
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
     
-    IERC20 public token;
-    address public admin;
-    uint256 public depositFee;
     uint256 public yieldRate;
     bool public depositsPaused;
     
-    mapping(address => uint256) public balances;
     mapping(address => uint256) public lastYieldClaim;
     mapping(address => uint256) public accumulatedYield;
-    uint256 public totalDeposits;
-    uint256 public __gap1;
     
     event YieldRateSet(uint256 newRate);
     event YieldClaimed(address indexed user, uint256 amount);
     event DepositsPaused();
     event DepositsUnpaused();
     
-    /// @notice Get total deposits
-    function totalDeposits() external view returns (uint256) {
-        return totalDeposits;
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
     }
     
-    /// @notice Deposit tokens into the vault
-    function deposit(uint256 amount) external {
+    /// @notice Initialize TokenVaultV2 with yield rate
+    /// @param _yieldRate The yield rate in basis points
+    function initializeV2(uint256 _yieldRate) public initializer {
+        __AccessControl_init();
+        __UUPSUpgradeable_init();
+        
+        yieldRate = _yieldRate;
+        _grantRole(PAUSER_ROLE, msg.sender);
+    }
+    
+    /// @notice Override deposit to update yield tracking
+    /// @param amount The amount of tokens to deposit
+    function deposit(uint256 amount) external override {
         require(!depositsPaused, "Deposits are paused");
         require(amount > 0, "Amount must be greater than 0");
+        
+        // Update accumulated yield before resetting claim time
+        if (balances[msg.sender] > 0) {
+            uint256 timeElapsed = block.timestamp - lastYieldClaim[msg.sender];
+            uint256 newYield = (balances[msg.sender] * yieldRate * timeElapsed) / (365 days * 10000);
+            accumulatedYield[msg.sender] += newYield;
+        }
         
         uint256 fee = (amount * depositFee) / 10000;
         uint256 creditAmount = amount - fee;
@@ -46,41 +55,26 @@ contract TokenVaultV2 is UUPSUpgradeable, AccessControlUpgradeable {
         balances[msg.sender] += creditAmount;
         totalDeposits += creditAmount;
         lastYieldClaim[msg.sender] = block.timestamp;
-    }
-    
-    /// @notice Withdraw tokens from the vault
-    function withdraw(uint256 amount) external {
-        require(amount > 0, "Amount must be greater than 0");
-        require(balances[msg.sender] >= amount, "Insufficient balance");
         
-        balances[msg.sender] -= amount;
-        totalDeposits -= amount;
-        
-        require(token.transfer(msg.sender, amount), "Transfer failed");
-    }
-    
-    /// @notice Get user balance
-    function balanceOf(address user) external view returns (uint256) {
-        return balances[user];
-    }
-    
-    /// @notice Get deposit fee
-    function getDepositFee() external view returns (uint256) {
-        return depositFee;
+        emit Deposited(msg.sender, creditAmount, fee);
     }
     
     /// @notice Set yield rate
+    /// @param _yieldRate The new yield rate in basis points
     function setYieldRate(uint256 _yieldRate) external onlyRole(DEFAULT_ADMIN_ROLE) {
         yieldRate = _yieldRate;
         emit YieldRateSet(_yieldRate);
     }
     
     /// @notice Get yield rate
+    /// @return The current yield rate
     function getYieldRate() external view returns (uint256) {
         return yieldRate;
     }
     
     /// @notice Get user yield
+    /// @param user The user address
+    /// @return The user's current yield
     function getUserYield(address user) external view returns (uint256) {
         if (balances[user] == 0) return accumulatedYield[user];
         
@@ -90,6 +84,7 @@ contract TokenVaultV2 is UUPSUpgradeable, AccessControlUpgradeable {
     }
     
     /// @notice Claim yield
+    /// @return The amount of yield claimed
     function claimYield() external returns (uint256) {
         uint256 timeElapsed = block.timestamp - lastYieldClaim[msg.sender];
         uint256 newYield = (balances[msg.sender] * yieldRate * timeElapsed) / (365 days * 10000);
@@ -97,8 +92,11 @@ contract TokenVaultV2 is UUPSUpgradeable, AccessControlUpgradeable {
         
         require(totalYield > 0, "No yield to claim");
         
+        // Update state before external call (Checks-Effects-Interactions)
         accumulatedYield[msg.sender] = 0;
         lastYieldClaim[msg.sender] = block.timestamp;
+        balances[msg.sender] -= totalYield;
+        totalDeposits -= totalYield;
         
         require(token.transfer(msg.sender, totalYield), "Transfer failed");
         emit YieldClaimed(msg.sender, totalYield);
@@ -118,15 +116,21 @@ contract TokenVaultV2 is UUPSUpgradeable, AccessControlUpgradeable {
     }
     
     /// @notice Check if deposits are paused
+    /// @return True if deposits are paused, false otherwise
     function isDepositsPaused() external view returns (bool) {
         return depositsPaused;
     }
     
     /// @notice Get implementation version
-    function getImplementationVersion() external pure returns (string memory) {
+    /// @return The version string
+    function getImplementationVersion() external pure override returns (string memory) {
         return "V2";
     }
     
     /// @notice Authorize upgrade
+    /// @param newImplementation The address of the new implementation
     function _authorizeUpgrade(address newImplementation) internal override onlyRole(UPGRADER_ROLE) {}
+    
+    /// @notice Storage gap for future versions
+    uint256[49] private __gap;
 }
